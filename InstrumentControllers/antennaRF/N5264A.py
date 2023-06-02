@@ -1,10 +1,9 @@
 import pyvisa
 import time
 from loguru import logger
-from InstrumentControllers.antennaRF.antennaRFController import AntennaRFController
 
 
-class N5264A(AntennaRFController):
+class N5264A():
     def __init__(self,addr="algoquetengoquemirar") -> None:
         rm = pyvisa.ResourceManager()
         self.__visa_resource = rm.open_resource(addr)
@@ -23,13 +22,13 @@ class N5264A(AntennaRFController):
         return super().create_measurement(name, param)
 
     #PNA del esférico
-    def setup_single_freq_cut(self,channel,frecuency,points,if_bw=100):
+    def setup_single_freq_cut(self,frecuency,points,if_bw=100,power=12):
         self.multiplier_by_frequency(frecuency)
 
         self.__visa_resource.write("SENS:SWE:GRO:COUN 1")
         self.__visa_resource.write("SENS:FREQ:SPAN 0")
         self.__visa_resource.write("SENS:BWID {}Hz".format(if_bw))
-
+        self.__visa_resource.write("SOUR:POW {}, 'PSG'".format(power))    
         self.__visa_resource.write("SENS:SWE:POIN {}".format(points))
 
         self.__visa_resource.write("SENS:FREQ:CENT {} GHz".format(frecuency))
@@ -51,6 +50,13 @@ class N5264A(AntennaRFController):
         self.__visa_resource.write("TRIG:SEQ:SOUR MAN")
         self.__visa_resource.write("TRIG:SCOP CURR")
         self.__visa_resource.write("SENS:SWE:TRIG:MODE POINT")
+    
+    def config_external_trigger(self):
+        self.__visa_resource.write("TRIG:SEQ:SOUR EXT")
+        self.__visa_resource.write("TRIG:SCOP CURR")
+        self.__visa_resource.write("SENS:SWE:TRIG:MODE POINT")
+        self.__visa_resource.write("CONT:SIGN BNC1,TIENEGATIVE")
+
 
 
 

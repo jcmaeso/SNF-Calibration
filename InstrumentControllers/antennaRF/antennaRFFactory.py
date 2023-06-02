@@ -36,7 +36,7 @@ class ARFCFactory():
             if id == 'ES8362B':
                 self.__rfController = E8362B() if addr == "" else E8362B(addr)
             elif id=="N5264A":
-                self.__rfController = N5264A() if addr == "" else E8362B(addr)
+                self.__rfController = N5264A() if addr == "" else N5264A(addr)
             else:
                 raise Exception("Unknown device")
     

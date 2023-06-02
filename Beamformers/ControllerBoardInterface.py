@@ -3,7 +3,7 @@ import serial
 import pyvisa
 import time
 from datetime import datetime
-from SerialControllerBoardInterface import SerialControllerBoardInterface
+from Beamformers.SerialControllerBoardInterface import SerialControllerBoardInterface
 import struct
 from loguru import logger
 

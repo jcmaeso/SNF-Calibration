@@ -5,7 +5,9 @@ import matplotlib.pyplot as plt
 from  InstrumentControllers.antennaRF.N5264A import N5264A
 from Beamformers.ControllerBoardInterface import ControllerBoardInterface
 from loguru import logger
+from InstrumentControllers.motor.orbit import Orbit
 import scipy
+import time
 
 
 def calc(measured_data: npt.ArrayLike, phase_shifted: npt.ArrayLike) -> complex:
@@ -55,29 +57,33 @@ def antenna_power_off(board):
 
 
 def main_measurement():
+    #Outputs
+    outfilename = "broadside_uniform_cal_4_iter_10log"
     #Equipment setup
     antenna_com_port = "COM4"
     pna_ip_addr = "GPIB0::16::INSTR"
-    orbit_gpib_addr = ""
+    orbit_gpib_addr = "GPIB0::4::INSTR"
     #Algorithm setup
-    outfile = "ATT-10-PER-COL"
     mapping = [6,7,4,5,2,3,0,1]
     initial_amp = [3,23,43,63,63,43,23,3]
     initial_phases = [0x00 for i in range(0,len(mapping))]
-    phase_increment = 11.25/2
-    phase_shifts = np.arange(0, 360, phase_increment)
-    phase_states_to_meas = np.zeros((len(mapping),len(phase_shifts)))
-    phase_states_to_meas_disc = np.zeros((len(mapping),len(phase_shifts)),dtype=int)
-    #Add to inital state the sequence of phase shifting
-    for i in range(0,len(mapping)):
-        phase_states_to_meas[i,:] = np.mod(initial_phases[i]+phase_shifts,360)
-    phase_states_to_meas_disc = (phase_states_to_meas/phase_increment).astype(int)
+    #Cut configuration
+    cut_axis = 1
+    cut_speed = 70
+    angular_init = -160
+    angular_end = 160
+    angular_increment = 1
+    angular_points = len(np.arange(angular_init,angular_end,angular_increment))+1
+    angular_direction = "f"
 
     #Start Connection with the VNA
     pna = N5264A(addr=pna_ip_addr)
     pna.preset()
-    pna.setup_single_freq_cut(28,len(phase_shifts))
-    pna.config_manual_trigger()
+    pna.setup_single_freq_cut(28,angular_points)
+    pna.config_external_trigger()
+
+    #Get Motor Controller
+    motor_controller = Orbit.get_instance()
 
     #Init Antenna Controller
     board = ControllerBoardInterface(antenna_com_port)
@@ -98,57 +104,21 @@ def main_measurement():
 
     
     #Initial matrix for data
-    measured_data = np.zeros((len(mapping), len(phase_shifts)), dtype=complex)
-
-    #Measure Phase shift
-    for j in range(0,len(mapping)):
-        for i in range(0,len(phase_shifts)):
-            board.send_set_phase_amp_to_channel(mapping[j],phase_states_to_meas_disc[j,i],initial_amp[j])
-            pna.send_trigger()
-        meas_trace = np.array(pna.get_data_double(),dtype=complex)
-        measured_data[j,:] = meas_trace[::2]+1j*meas_trace[1::2]
+    measured_data = np.zeros(angular_points, dtype=complex)
             
+    motor_controller.mode_register_movement(cut_axis,angular_init%360,angular_end%360,cut_speed,angular_increment,angular_direction)
 
-    recovered_excitation = np.zeros(len(mapping), dtype=complex)
-    for i in range(0, len(mapping)):
-        recovered_excitation[i] = calc(measured_data[i,:],phase_shifts)
-        plt.plot(phase_shifts, 20 * np.log10(np.abs(measured_data[i, :])))
-        print(f"E{i+1} Amp:{np.abs(recovered_excitation[i]/recovered_excitation[0]):2.2f}"
-              f" Phase:{np.rad2deg(np.angle(recovered_excitation[i]/recovered_excitation[0])):2.2f}")
+    meas_trace = np.array(pna.get_data_double(),dtype=complex)
+    measured_data = meas_trace[::2]+1j*meas_trace[1::2]
+    angular_axis = np.arange(angular_init,angular_end+angular_increment,angular_increment)
+    plt.plot(angular_axis, 20 * np.log10(np.abs(measured_data))-np.max(20 * np.log10(np.abs(measured_data))))
+    scipy.io.savemat(f"{outfilename}.mat",{"theta": angular_axis,"measured_data":measured_data})
+    time.sleep(1)
+    motor_controller.mode_position_movement(int(cut_axis),0,'f',90)
     plt.show()
-    scipy.io.savemat(f"{outfile}.mat",{"meas_rev": measured_data,"cal_coefs":recovered_excitation})
 
 
-def main_simulation ():
-    eng = matlab.engine.start_matlab()
-    eng.cd(r'HertzDipole', nargout=0)
-    xp = np.linspace(-1.75, 1.75, 8)
-    yp = xp * 0
-    zp = xp * 0
-    ai = np.ones(len(xp))
-    Theta = 0.0
-    Phi = 0.0
-    kr = 5 / (3e8 / 28e9)
 
-    # Aim the array
-    ai = ai * np.exp(1j * np.deg2rad(np.linspace(0, 355, 8)))
-
-    phase_shift = np.arange(0, 360, 1)
-    measured_data = np.zeros((len(xp), len(phase_shift)), dtype=complex)
-
-    for i in range(0, len(xp)):
-        for j in range(0, len(phase_shift)):
-            shifted_ai = np.copy(ai)
-            shifted_ai[i] = shifted_ai[i] * np.exp(1j * np.deg2rad(phase_shift[j]),dtype=complex)
-            _, _, _, measured_data[i, j], _ = eng.dipoleXArray(xp, yp, zp, shifted_ai, Theta, Phi, kr, nargout=5)
-
-    recovered_excitation = np.zeros(len(xp), dtype=complex)
-    for i in range(0, len(xp)):
-        recovered_excitation[i] = calc(measured_data[i,:],phase_shift)
-        plt.plot(phase_shift, 20 * np.log10(np.abs(measured_data[i, :])))
-        print(f"E{i+1} Amp:{np.abs(recovered_excitation[i]/recovered_excitation[0]):2.2f}"
-              f" Phase:{np.rad2deg(np.angle(recovered_excitation[i]/recovered_excitation[0])):2.2f}")
-    plt.show()
 
 
 
